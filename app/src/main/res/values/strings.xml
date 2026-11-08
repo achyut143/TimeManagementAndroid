@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">FocusFlow</string>
+    <string name="widget_description">Today\'s points and your next tasks</string>
+</resources>
