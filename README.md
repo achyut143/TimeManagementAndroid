@@ -36,8 +36,10 @@ The same rules as the iOS app, ported from Swift:
 - **Tasks**: day view with an hourly timeline and an untimed list, plus prev/next day and a date picker.
   - Quick add uses the same syntax: `15:30 - 16:30 - task - 2 - r1`, with commas for several tasks.
   - Complete or not-complete a task, edit, snooze, send to backlog, delete, and manage subtasks.
-  - Completing or missing a repeat task creates its next occurrence `repeatAgain` days later. The red repeat icon (`reassign`) means the next one is already handled.
-  - A not-completed task rolls over to tomorrow, except daily repeat tasks.
+  - Repeat a task every N days, on chosen weekdays (e.g. every Mon, or Tue + Wed), or monthly on a day (e.g. the 15th; 29–31 fall on the last day of shorter months).
+  - Opening a day (today or later) creates the repeat tasks due that day, so planned tasks show up ahead of time. Deleted, moved or backlogged occurrences aren't brought back, and turning repeat off removes later copies that haven't been touched.
+  - Completing or missing a repeat task also creates its next occurrence on the next matching day (never twice on one day). Each copy shows its repeat number (`↻#3`). The red repeat icon (`reassign`) means the next one is already handled.
+  - A not-completed task rolls over to tomorrow, unless its next repeat already lands tomorrow.
   - "Mark all not completed" works for a whole day.
   - Repeat-task cards show the completion % and streak over the last 7/15/30/45/60 days, with the ≥85% / <85% filter.
 - **Habits**: every repeat task grouped by title. Shows done, missed, %, current and best streak, and points. Filter by %, sort, filter by tag, and open a done/missed calendar per habit. Opens on the current month.

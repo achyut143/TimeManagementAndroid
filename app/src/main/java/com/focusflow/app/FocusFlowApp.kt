@@ -8,6 +8,11 @@ import com.focusflow.app.data.TaskRepository
 import com.focusflow.app.focus.FocusTimer
 import com.focusflow.app.notify.Notifications
 import com.focusflow.app.notify.ReminderScheduler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import java.time.LocalDate
 
 /** Holds the app's single instances. Small apps don't need Hilt for this. */
 class AppContainer(context: Context) {
@@ -26,5 +31,9 @@ class FocusFlowApp : Application() {
         super.onCreate()
         Notifications.createChannels(this)
         container = AppContainer(this)
+        // Make sure today's repeat tasks exist for reminders and the widget, even before the app is opened.
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            runCatching { container.repository.ensureRepeatsFor(LocalDate.now()) }
+        }
     }
 }

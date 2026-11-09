@@ -18,7 +18,7 @@ import java.util.UUID
  */
 @Entity(
     tableName = "tasks",
-    indices = [Index("date"), Index("title"), Index("goalId"), Index("backlogFolderId")],
+    indices = [Index("date"), Index("title"), Index("goalId"), Index("backlogFolderId"), Index("seriesId")],
     foreignKeys = [
         ForeignKey(
             entity = GoalEntity::class,
@@ -41,8 +41,18 @@ data class TaskEntity(
     val weight: Double = 1.0,
     val notes: String? = null,
     val date: LocalDate? = null,
-    /** Repeat every N days. Non-null means this task is a habit. */
+    /** Repeat every N days. Non-null means this task is a habit (also set for weekly / monthly rules). */
     val repeatAgain: Int? = null,
+    /** Weekly repeat: ISO weekdays "1,3" (Mon = 1). Takes priority over [repeatAgain]. */
+    val repeatWeekdays: String? = null,
+    /** Monthly repeat on this day of the month (1–31). */
+    val repeatMonthDay: Int? = null,
+    /** Which occurrence this is (1 = first). A roll-over copy keeps the same number. */
+    val repeatNumber: Int? = null,
+    /** Shared by every copy of one repeat task, so the series survives a rename. */
+    val seriesId: String? = null,
+    /** Last day a repeat may land on (inclusive). Null = repeats forever. */
+    val repeatUntil: LocalDate? = null,
     val priority: String = "P3",
     /** Minutes actually spent. */
     val timeSpent: Double? = null,
@@ -105,4 +115,14 @@ data class GoalEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val name: String,
     val goalDescription: String = "",
+)
+
+/**
+ * A repeat occurrence the user removed (deleted, moved to another day or sent to
+ * the Backlog), so opening that day doesn't create it again.
+ */
+@Entity(tableName = "skipped_occurrences", primaryKeys = ["seriesId", "date"])
+data class SkippedOccurrenceEntity(
+    val seriesId: String,
+    val date: LocalDate,
 )

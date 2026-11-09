@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import com.focusflow.app.data.GoalEntity
 import com.focusflow.app.data.TaskEntity
 import com.focusflow.app.domain.TaskTime
+import com.focusflow.app.domain.repeatRule
 import com.focusflow.app.domain.isUntimed
 import com.focusflow.app.ui.common.longLabel
 import com.focusflow.app.ui.common.pts
@@ -95,7 +96,10 @@ fun TaskDetailSheet(
                 if (!t.isUntimed) add("${TaskTime.displayTime(t.startTime)} – ${TaskTime.displayTime(t.endTime)}")
                 add("${t.weight.pts()} pt")
                 add(t.priority)
-                t.repeatAgain?.let { add("repeats every $it day${if (it == 1) "" else "s"}") }
+                t.repeatRule?.let { rule ->
+                    add(rule.longLabel() + (t.repeatUntil?.let { " until ${it.longLabel()}" } ?: ""))
+                    t.repeatNumber?.let { add("repeat #$it") }
+                }
                 t.goalId?.let { id -> goals.firstOrNull { it.id == id }?.let { add("goal: ${it.name}") } }
             }
             Text(details.joinToString(" · "), style = MaterialTheme.typography.bodyMedium)

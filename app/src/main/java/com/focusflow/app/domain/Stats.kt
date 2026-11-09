@@ -62,6 +62,8 @@ data class HabitStats(
     val earned: Double,
     val allocated: Double,
     val repeatInterval: Int,
+    /** e.g. "2d", "Mon, Wed", "15th". */
+    val repeatLabel: String = "${repeatInterval}d",
     val tags: List<String>,
     /** Completed (true) or missed (false) for each day in range that has a result. */
     val days: Map<LocalDate, Boolean>,
@@ -98,6 +100,7 @@ object HabitStatsCalculator {
                 earned = habitTasks.filter { it.completed }.sumOf { it.effectiveWeight },
                 allocated = habitTasks.sumOf { it.weight },
                 repeatInterval = habitTasks.first().repeatAgain ?: 1,
+                repeatLabel = habitTasks.maxBy { it.date!! }.repeatRule?.shortLabel() ?: "${habitTasks.first().repeatAgain ?: 1}d",
                 tags = habitTasks.flatMap { it.tags.split(",") }.map { it.trim() }.filter { it.isNotEmpty() }.distinct(),
                 days = days,
             )

@@ -60,6 +60,7 @@ class ReminderScheduler(private val context: Context) {
             .setData(Uri.parse("focusflow://reminder/$taskId/$kind"))
             .putExtra(EXTRA_TITLE, title)
             .putExtra(EXTRA_KIND, kind)
+            .putExtra(EXTRA_TASK_ID, taskId)
         return PendingIntent.getBroadcast(
             context,
             0,
@@ -73,6 +74,7 @@ class ReminderScheduler(private val context: Context) {
         const val KIND_END = "end"
         const val EXTRA_TITLE = "title"
         const val EXTRA_KIND = "kind"
+        const val EXTRA_TASK_ID = "taskId"
     }
 }
 
@@ -80,6 +82,11 @@ class ReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val title = intent.getStringExtra(ReminderScheduler.EXTRA_TITLE).orEmpty()
         val isStart = intent.getStringExtra(ReminderScheduler.EXTRA_KIND) == ReminderScheduler.KIND_START
+        // Task start: ring (sound / speech) until acknowledged, unless set to "Notification only".
+        if (isStart && AlarmMode.get(context) != AlarmMode.Off) {
+            val taskId = intent.getStringExtra(ReminderScheduler.EXTRA_TASK_ID) ?: intent.data.toString()
+            if (TaskAlarmService.ring(context, taskId, title)) return
+        }
         Notifications.post(
             context,
             id = intent.data.hashCode(),
@@ -93,12 +100,16 @@ class ReminderReceiver : BroadcastReceiver() {
  * Sets all reminders again when they may be missing or late:
  * - after a reboot (Android clears alarms), and
  * - when "Alarms & reminders" is turned on, so reminders set earlier as
- *   inexact alarms become exact.
+ *   inexact alarms become exact, and
+ * - when the timezone or clock changes. Task times are wall-clock times ("8:00"),
+ *   so breakfast stays at 8 AM in the new country; the alarms must move with it.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val handled = intent.action == Intent.ACTION_BOOT_COMPLETED ||
-            intent.action == AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED
+            intent.action == AlarmManager.ACTION_SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED ||
+            intent.action == Intent.ACTION_TIMEZONE_CHANGED ||
+            intent.action == Intent.ACTION_TIME_CHANGED
         if (!handled) return
         val container = (context.applicationContext as FocusFlowApp).container
         val pending = goAsync()

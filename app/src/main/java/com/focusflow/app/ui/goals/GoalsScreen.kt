@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,6 +43,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.focusflow.app.AppContainer
 import com.focusflow.app.data.GoalEntity
+import com.focusflow.app.domain.Progress
 import com.focusflow.app.ui.common.NoInsets
 import com.focusflow.app.ui.common.containerFactory
 import com.focusflow.app.ui.theme.StatusColors
@@ -51,9 +53,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-data class GoalRow(val goal: GoalEntity, val taskCount: Int, val completed: Int) {
-    val percent: Int get() = if (taskCount > 0) completed * 100 / taskCount else 0
-}
+data class GoalRow(val goal: GoalEntity, val progress: Progress)
 
 class GoalsViewModel(private val c: AppContainer) : ViewModel() {
     val goals: StateFlow<List<GoalRow>> =
@@ -61,7 +61,7 @@ class GoalsViewModel(private val c: AppContainer) : ViewModel() {
             val byGoal = tasks.groupBy { it.goalId }
             goals.map { g ->
                 val list = byGoal[g.id].orEmpty()
-                GoalRow(g, list.size, list.count { it.completed })
+                GoalRow(g, Progress.of(list))
             }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -75,7 +75,7 @@ class GoalsViewModel(private val c: AppContainer) : ViewModel() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GoalsScreen(vm: GoalsViewModel = viewModel(factory = GoalsViewModel.Factory)) {
+fun GoalsScreen(onOpenGoal: (String) -> Unit, vm: GoalsViewModel = viewModel(factory = GoalsViewModel.Factory)) {
     val goals by vm.goals.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<GoalEntity?>(null) }
     var deleting by remember { mutableStateOf<GoalEntity?>(null) }
@@ -103,7 +103,7 @@ fun GoalsScreen(vm: GoalsViewModel = viewModel(factory = GoalsViewModel.Factory)
                 }
             }
             items(goals, key = { it.goal.id }) { row ->
-                Card(onClick = { editing = row.goal }, modifier = Modifier.fillMaxWidth()) {
+                Card(onClick = { onOpenGoal(row.goal.id) }, modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -112,19 +112,13 @@ fun GoalsScreen(vm: GoalsViewModel = viewModel(factory = GoalsViewModel.Factory)
                                     Text(row.goal.goalDescription, style = MaterialTheme.typography.bodySmall)
                                 }
                             }
+                            ProgressPercent(row.progress)
+                            IconButton(onClick = { editing = row.goal }) { Icon(Icons.Filled.Edit, "Edit goal") }
                             IconButton(onClick = { deleting = row.goal }) { Icon(Icons.Filled.Delete, "Delete goal") }
                         }
                         Spacer(Modifier.height(6.dp))
-                        LinearProgressIndicator(
-                            progress = { row.percent / 100f },
-                            modifier = Modifier.fillMaxWidth(),
-                            color = StatusColors.forPercent(row.percent),
-                        )
-                        Text(
-                            "${row.completed}/${row.taskCount} tasks done · ${row.percent}%",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
+                        ProgressBar(row.progress)
+                        ProgressSummary(row.progress, Modifier.padding(top = 4.dp))
                     }
                 }
             }

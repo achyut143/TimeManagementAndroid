@@ -21,6 +21,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.focusflow.app.notify.ExactAlarms
+import com.focusflow.app.notify.TaskAlarmService
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.focusflow.app.notify.Notifications
 import com.focusflow.app.ui.FocusFlowNavHost
 import com.focusflow.app.ui.theme.FocusFlowTheme
@@ -48,9 +55,28 @@ class MainActivity : ComponentActivity() {
                 }
                 FocusFlowNavHost()
                 if (notificationsAnswered) ExactAlarmPrompt()
+                RingingAlarmDialog()
             }
         }
     }
+}
+
+/** While a task start is ringing and the app is open, "Got it" right here. */
+@Composable
+private fun RingingAlarmDialog() {
+    val context = LocalContext.current
+    val ringing by TaskAlarmService.ringing.collectAsStateWithLifecycle()
+    if (ringing.isEmpty()) return
+    AlertDialog(
+        onDismissRequest = {}, // only the buttons stop the alarm
+        icon = { Icon(Icons.Filled.Alarm, null) },
+        title = { Text("Time to start") },
+        text = { Text(ringing.joinToString("\n") { it.title }, style = MaterialTheme.typography.titleLarge) },
+        confirmButton = { Button(onClick = { TaskAlarmService.stop(context) }) { Text("Got it") } },
+        dismissButton = {
+            TextButton(onClick = { TaskAlarmService.snooze(context) }) { Text("Snooze ${TaskAlarmService.SNOOZE_MINUTES} min") }
+        },
+    )
 }
 
 /**

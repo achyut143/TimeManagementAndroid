@@ -39,6 +39,11 @@ class TasksViewModel(private val c: AppContainer) : ViewModel() {
     private val _date = MutableStateFlow(LocalDate.now())
     val date: StateFlow<LocalDate> = _date.asStateFlow()
 
+    init {
+        // Each time a day is opened, create the repeat tasks that belong on it.
+        viewModelScope.launch { _date.collect { repo.ensureRepeatsFor(it) } }
+    }
+
     val tasks: StateFlow<List<TaskEntity>> = _date
         .flatMapLatest { dao.observeOn(it) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -79,6 +84,7 @@ class TasksViewModel(private val c: AppContainer) : ViewModel() {
     fun toggleNotCompleted(task: TaskEntity) = act { repo.toggleNotCompleted(task) }
     fun markAllNotCompleted() = act { repo.markAllNotCompleted(_date.value) }
     fun snooze(task: TaskEntity, minutes: Int) = act { repo.snooze(task, minutes) }
+    fun moveTask(task: TaskEntity, startMinute: Int) = act { repo.moveTo(task, startMinute) }
     fun sendToBacklog(task: TaskEntity) = act { repo.sendToBacklog(task) }
     fun quickAdd(input: String) = act { repo.quickAdd(input, _date.value) }
 

@@ -23,6 +23,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.focusflow.app.ui.backlog.BacklogScreen
 import com.focusflow.app.ui.common.NoInsets
+import com.focusflow.app.ui.goals.GoalDetailScreen
 import com.focusflow.app.ui.goals.GoalsScreen
 import com.focusflow.app.ui.habits.HabitsScreen
 import com.focusflow.app.ui.points.PointsScreen
@@ -70,7 +71,10 @@ fun FocusFlowNavHost() {
             composable(Tab.Tasks.route) { TasksScreen(onOpenBacklog = { nav.navigate(BACKLOG) }) }
             composable(Tab.Habits.route) { HabitsScreen() }
             composable(Tab.Points.route) { PointsScreen() }
-            composable(Tab.Goals.route) { GoalsScreen() }
+            composable(Tab.Goals.route) { GoalsScreen(onOpenGoal = { nav.navigate("goal/$it") }) }
+            composable("goal/{goalId}") { e ->
+                GoalDetailScreen(goalId = e.arguments?.getString("goalId").orEmpty(), onBack = { nav.popBackStack() })
+            }
             composable(BACKLOG) { BacklogScreen(onBack = { nav.popBackStack() }) }
         }
     }

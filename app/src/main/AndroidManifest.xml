@@ -4,6 +4,12 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Task start alarm: rings with the screen off until acknowledged -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:name=".FocusFlowApp"
@@ -23,19 +29,37 @@
             </intent-filter>
         </activity>
 
+        <!-- Full-screen "Got it" page shown over the lock screen while a task start rings -->
+        <activity
+            android:name=".notify.AlarmActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:turnScreenOn="true" />
+
+        <!-- Plays the task start alarm (sound + speech) until acknowledged -->
+        <service
+            android:name=".notify.TaskAlarmService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
         <!-- Task start / end reminders -->
         <receiver
             android:name=".notify.ReminderReceiver"
             android:exported="false" />
 
-        <!-- Re-schedules reminders and the focus timer after a reboot,
-             and when "Alarms & reminders" is turned on -->
+        <!-- Re-schedules reminders and the focus timer after a reboot, when
+             "Alarms & reminders" is turned on, and when the timezone or clock changes -->
         <receiver
             android:name=".notify.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.TIME_SET" />
             </intent-filter>
         </receiver>
 

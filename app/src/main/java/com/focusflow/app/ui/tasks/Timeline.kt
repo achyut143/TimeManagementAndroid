@@ -2,6 +2,7 @@ package com.focusflow.app.ui.tasks
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,11 +27,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -42,8 +51,10 @@ import com.focusflow.app.data.TaskEntity
 import com.focusflow.app.domain.TaskMetrics
 import com.focusflow.app.domain.TaskTime
 import com.focusflow.app.domain.isRunning
+import com.focusflow.app.domain.isRepeating
 import com.focusflow.app.ui.theme.StatusColors
 import java.time.LocalTime
+import kotlin.math.roundToInt
 
 /** Height of one minute on the timeline: an hour is 120dp, a 15-minute task is 30dp. */
 val MinuteHeight: Dp = 2.dp
@@ -61,6 +72,7 @@ private val NarrowBelow = 220.dp
  * A day timeline where each task sits at its start minute and is as tall as
  * its duration. Tasks that overlap share the width side by side, like iOS.
  * Tapping an empty spot starts a new task at that time (rounded to 15 min).
+ * Long-press a task and drag it up or down to move it (snaps to 5 min).
  */
 @Composable
 fun Timeline(
@@ -70,11 +82,15 @@ fun Timeline(
     now: LocalTime,
     onTapEmpty: (startMinute: Int) -> Unit,
     onSelect: (TaskEntity) -> Unit,
+    onMove: (TaskEntity, startMinute: Int) -> Unit,
     onComplete: (TaskEntity) -> Unit,
     onNotComplete: (TaskEntity) -> Unit,
 ) {
     val columns = remember(tasks) { layoutColumns(tasks) }
     val tapEmpty by rememberUpdatedState(onTapEmpty)
+    val move by rememberUpdatedState(onMove)
+    val minutePx = with(LocalDensity.current) { MinuteHeight.toPx() }
+    val haptics = LocalHapticFeedback.current
 
     BoxWithConstraints(
         Modifier.fillMaxWidth().height(HourHeight * 24).pointerInput(Unit) {
@@ -110,9 +126,44 @@ fun Timeline(
             val (column, count) = columns[task.id] ?: (0 to 1)
             val width = trackWidth / count
             val height = (MinuteHeight * duration).coerceAtLeast(MinCardHeight)
+            var dragging by remember(task.id) { mutableStateOf(false) }
+            var dragY by remember(task.id) { mutableFloatStateOf(0f) }
+            // Where the task would start if dropped now, snapped to 5 minutes.
+            val dropStart = if (dragging) {
+                val delta = ((dragY / minutePx) / 5).roundToInt() * 5
+                (start + delta).coerceIn(0, 24 * 60 - 5)
+            } else {
+                start
+            }
             Box(
-                Modifier.offset(x = LabelWidth + width * column, y = MinuteHeight * start)
-                    .width(width).height(height).padding(horizontal = 1.dp, vertical = 0.5.dp),
+                Modifier.zIndex(if (dragging) 1f else 0f)
+                    .offset(x = LabelWidth + width * column, y = MinuteHeight * dropStart)
+                    .width(width).height(height).padding(horizontal = 1.dp, vertical = 0.5.dp)
+                    .then(if (dragging) Modifier.shadow(8.dp, RoundedCornerShape(8.dp)) else Modifier)
+                    .pointerInput(task.id, task.startTime) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                dragY = 0f
+                                dragging = true
+                            },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                dragY += amount.y
+                            },
+                            onDragEnd = {
+                                val delta = ((dragY / minutePx) / 5).roundToInt() * 5
+                                val newStart = (start + delta).coerceIn(0, 24 * 60 - 5)
+                                dragging = false
+                                dragY = 0f
+                                if (newStart != start) move(task, newStart)
+                            },
+                            onDragCancel = {
+                                dragging = false
+                                dragY = 0f
+                            },
+                        )
+                    },
             ) {
                 val isCurrent = isToday && task.isRunning()
                 if (height < CompactBelow) {
@@ -128,6 +179,17 @@ fun Timeline(
                         onComplete = { onComplete(task) },
                         onNotComplete = { onNotComplete(task) },
                         modifier = Modifier.fillMaxSize(),
+                    )
+                }
+                if (dragging) {
+                    Text(
+                        TaskTime.displayTime(TaskTime.fromMinutes(dropStart)),
+                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
+                            .background(MaterialTheme.colorScheme.inverseSurface, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
@@ -167,6 +229,15 @@ private fun CompactTaskCard(
             overflow = TextOverflow.Ellipsis,
             textDecoration = if (task.completed) TextDecoration.LineThrough else null,
         )
+        repeatBadge(task)?.let {
+            Text(
+                it,
+                fontSize = 11.sp,
+                maxLines = 1,
+                color = if (task.reassign) StatusColors.Red else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(4.dp))
+        }
         if (showTime) {
             Text(
                 "${TaskTime.displayTime(task.startTime)}–${TaskTime.displayTime(task.endTime)}",
@@ -207,7 +278,8 @@ private fun NarrowTaskCard(
             )
         }
         Text(
-            "${TaskTime.displayTime(task.startTime)}–${TaskTime.displayTime(task.endTime)}",
+            "${TaskTime.displayTime(task.startTime)}–${TaskTime.displayTime(task.endTime)}" +
+                (repeatBadge(task)?.let { "  $it" } ?: ""),
             fontSize = 11.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -216,6 +288,10 @@ private fun NarrowTaskCard(
         Row(verticalAlignment = Alignment.CenterVertically) { DoneButtons(task, onComplete, onNotComplete) }
     }
 }
+
+/** "↻#3" for a repeat task (just "↻" if it has no number yet), null otherwise. */
+private fun repeatBadge(task: TaskEntity): String? =
+    if (!task.isRepeating) null else "↻" + (task.repeatNumber?.let { "#$it" } ?: "")
 
 @Composable
 private fun containerColor(task: TaskEntity, isCurrent: Boolean) = when {

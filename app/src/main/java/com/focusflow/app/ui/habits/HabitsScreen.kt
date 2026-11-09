@@ -22,7 +22,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -53,6 +57,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.focusflow.app.AppContainer
+import com.focusflow.app.data.TaskEntity
 import com.focusflow.app.domain.HabitStats
 import com.focusflow.app.domain.HabitStatsCalculator
 import com.focusflow.app.ui.common.DateRangePickerDialog
@@ -67,22 +72,30 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.TextStyle
 import java.util.Locale
 
-class HabitsViewModel(c: AppContainer) : ViewModel() {
+class HabitsViewModel(private val c: AppContainer) : ViewModel() {
     // Opens on the current month, like iOS.
     private val _range = MutableStateFlow(YearMonth.now().let { it.atDay(1) to it.atEndOfMonth() })
     val range: StateFlow<Pair<LocalDate, LocalDate>> = _range.asStateFlow()
 
+    /** Every repeat task, so a habit's calendar can show any month. */
+    val repeating: StateFlow<List<TaskEntity>> = c.db.taskDao().observeRepeating()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val habits: StateFlow<List<HabitStats>> =
-        combine(c.db.taskDao().observeRepeating(), _range) { tasks, (from, to) ->
+        combine(repeating, _range) { tasks, (from, to) ->
             HabitStatsCalculator.compute(tasks, from, to)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun setRange(from: LocalDate, to: LocalDate) { _range.value = from to to }
+
+    fun stopRoutine(name: String) = viewModelScope.launch { c.repository.stopRoutine(name) }
+    fun deleteRoutine(name: String) = viewModelScope.launch { c.repository.deleteRoutine(name) }
 
     /** Moves the range by its own length (previous / next month when a full month is shown). */
     fun shift(forward: Boolean) {
@@ -108,11 +121,13 @@ class HabitsViewModel(c: AppContainer) : ViewModel() {
 fun HabitsScreen(vm: HabitsViewModel = viewModel(factory = HabitsViewModel.Factory)) {
     val range by vm.range.collectAsStateWithLifecycle()
     val habits by vm.habits.collectAsStateWithLifecycle()
+    val repeating by vm.repeating.collectAsStateWithLifecycle()
     var filter by rememberSaveable { mutableStateOf("all") }
     var sort by rememberSaveable { mutableStateOf("desc") }
     var tag by rememberSaveable { mutableStateOf<String?>(null) }
     var pickRange by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<HabitStats?>(null) }
+    var toDelete by remember { mutableStateOf<String?>(null) }
 
     val allTags = habits.flatMap { it.tags }.distinct().sorted()
     val shown = habits
@@ -145,7 +160,15 @@ fun HabitsScreen(vm: HabitsViewModel = viewModel(factory = HabitsViewModel.Facto
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { vm.shift(false) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Earlier") }
                     TextButton(onClick = { pickRange = true }, modifier = Modifier.weight(1f)) {
-                        Text("${range.first.shortLabel()} – ${range.second.shortLabel()}, ${range.second.year}")
+                        val (from, to) = range
+                        val month = YearMonth.from(from)
+                        Text(
+                            if (from == month.atDay(1) && to == month.atEndOfMonth()) {
+                                "${month.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${month.year}"
+                            } else {
+                                "${from.shortLabel()} – ${to.shortLabel()}, ${to.year}"
+                            },
+                        )
                     }
                     IconButton(onClick = { vm.shift(true) }) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Later") }
                 }
@@ -173,27 +196,37 @@ fun HabitsScreen(vm: HabitsViewModel = viewModel(factory = HabitsViewModel.Facto
             if (shown.isEmpty()) {
                 item {
                     Text(
-                        "No habits in this range yet. Any task with \"Repeat every N days\" set shows up here.",
+                        "No habits in this range yet. Any task with a Repeat rule set shows up here.",
                         modifier = Modifier.padding(vertical = 32.dp).fillMaxWidth(),
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
-            items(shown, key = { it.name }) { habit -> HabitCard(habit) { selected = habit } }
+            items(shown, key = { it.name }) { habit ->
+                HabitCard(habit, onClick = { selected = habit }, onDelete = { toDelete = habit.name })
+            }
         }
     }
 
     if (pickRange) {
         DateRangePickerDialog(range.first, range.second, onDismiss = { pickRange = false }, onPick = vm::setRange)
     }
+    toDelete?.let { name ->
+        DeleteRoutineDialog(
+            name = name,
+            onStop = { vm.stopRoutine(name); toDelete = null },
+            onDeleteAll = { vm.deleteRoutine(name); toDelete = null },
+            onDismiss = { toDelete = null },
+        )
+    }
     selected?.let { habit ->
-        HabitDetailSheet(habit, range.first, range.second) { selected = null }
+        HabitDetailSheet(habit.name, repeating, YearMonth.from(range.second)) { selected = null }
     }
 }
 
 @Composable
-private fun HabitCard(habit: HabitStats, onClick: () -> Unit) {
+private fun HabitCard(habit: HabitStats, onClick: () -> Unit, onDelete: () -> Unit) {
     val pct = habit.percentage.toInt()
     val color = StatusColors.forPercent(pct)
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
@@ -201,6 +234,13 @@ private fun HabitCard(habit: HabitStats, onClick: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(habit.name, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
                 Text("$pct%", color = color, fontWeight = FontWeight.Bold)
+                IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        Icons.Outlined.Delete,
+                        contentDescription = "Delete routine",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             Spacer(Modifier.height(6.dp))
             LinearProgressIndicator(
@@ -211,7 +251,7 @@ private fun HabitCard(habit: HabitStats, onClick: () -> Unit) {
             Spacer(Modifier.height(6.dp))
             Text(
                 "✓ ${habit.completed}  ✗ ${habit.missed}  ·  🔥 ${habit.currentStreak} (best ${habit.maxStreak})  ·  " +
-                    "${habit.earned.pts()}/${habit.allocated.pts()} pts  ·  every ${habit.repeatInterval}d",
+                    "${habit.earned.pts()}/${habit.allocated.pts()} pts  ·  every ${habit.repeatLabel}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -219,24 +259,83 @@ private fun HabitCard(habit: HabitStats, onClick: () -> Unit) {
     }
 }
 
-/** Calendar of done / missed days for one habit. */
+/** Asks how to remove a routine: stop it (keep history) or delete every copy. */
+@Composable
+private fun DeleteRoutineDialog(name: String, onStop: () -> Unit, onDeleteAll: () -> Unit, onDismiss: () -> Unit) {
+    var confirmAll by remember { mutableStateOf(false) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (confirmAll) "Delete all of \"$name\"?" else "Remove \"$name\"") },
+        text = {
+            if (confirmAll) {
+                Text("Every copy of this routine, past and upcoming, and their subtasks will be deleted. Its history and points will be gone. This can't be undone.")
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = onStop, modifier = Modifier.fillMaxWidth()) { Text("Stop routine") }
+                    Text(
+                        "Removes upcoming copies and stops repeating. Past days, stats and points are kept.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedButton(
+                        onClick = { confirmAll = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                    ) { Text("Delete everything") }
+                    Text(
+                        "Deletes every copy, including past days and their history.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (confirmAll) {
+                TextButton(onClick = onDeleteAll) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+/** Calendar of done / missed days for one habit, one month at a time with ‹ › to move between months. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HabitDetailSheet(habit: HabitStats, from: LocalDate, to: LocalDate, onDismiss: () -> Unit) {
+private fun HabitDetailSheet(name: String, repeating: List<TaskEntity>, startMonth: YearMonth, onDismiss: () -> Unit) {
+    var month by remember { mutableStateOf(startMonth) }
+    val from = month.atDay(1)
+    val to = month.atEndOfMonth()
+    val stats = remember(repeating, name, month) {
+        HabitStatsCalculator.compute(repeating.filter { it.title == name }, from, to).firstOrNull()
+    }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.padding(horizontal = 20.dp).navigationBarsPadding()) {
-            Text(habit.name, style = MaterialTheme.typography.headlineSmall)
+            Text(name, style = MaterialTheme.typography.headlineSmall)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { month = month.minusMonths(1) }) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Previous month")
+                }
+                Text(
+                    "${month.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${month.year}",
+                    style = MaterialTheme.typography.titleMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { month = month.plusMonths(1) }) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Next month")
+                }
+            }
             Text(
-                "${habit.percentage.toInt()}% · ${habit.completed} done · ${habit.missed} missed · best streak ${habit.maxStreak}",
+                stats?.let {
+                    "${it.percentage.toInt()}% · ${it.completed} done · ${it.missed} missed · best streak ${it.maxStreak}"
+                } ?: "Nothing tracked this month",
                 style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(12.dp))
-            var month = YearMonth.from(from)
-            while (!month.isAfter(YearMonth.from(to))) {
-                MonthGrid(month, habit.days, from, to)
-                Spacer(Modifier.height(12.dp))
-                month = month.plusMonths(1)
-            }
+            MonthGrid(month, stats?.days.orEmpty(), from, to)
             Spacer(Modifier.height(24.dp))
         }
     }
@@ -244,11 +343,6 @@ private fun HabitDetailSheet(habit: HabitStats, from: LocalDate, to: LocalDate, 
 
 @Composable
 private fun MonthGrid(month: YearMonth, days: Map<LocalDate, Boolean>, from: LocalDate, to: LocalDate) {
-    Text(
-        "${month.month.getDisplayName(TextStyle.FULL, Locale.getDefault())} ${month.year}",
-        style = MaterialTheme.typography.titleSmall,
-    )
-    Spacer(Modifier.height(4.dp))
     // Monday-first weeks.
     val leading = month.atDay(1).dayOfWeek.value - 1
     val cells: List<LocalDate?> = List(leading) { null } + (1..month.lengthOfMonth()).map(month::atDay)

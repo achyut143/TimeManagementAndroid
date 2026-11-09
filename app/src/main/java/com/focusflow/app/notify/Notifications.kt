@@ -18,12 +18,21 @@ import com.focusflow.app.R
 object Notifications {
     const val CHANNEL_REMINDERS = "reminders"
     const val CHANNEL_FOCUS = "focus_timer"
+    const val CHANNEL_ALARM = "task_alarm"
 
     fun createChannels(context: Context) {
         val manager = context.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_REMINDERS, "Task reminders", NotificationManager.IMPORTANCE_HIGH).apply {
                 description = "When a task starts and ends"
+            },
+        )
+        manager.createNotificationChannel(
+            NotificationChannel(CHANNEL_ALARM, "Task start alarm", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "Rings when a task starts, until you tap Got it"
+                setSound(null, null) // the alarm service plays the sound and speech itself
+                enableVibration(false)
+                lockscreenVisibility = android.app.Notification.VISIBILITY_PUBLIC
             },
         )
         manager.createNotificationChannel(

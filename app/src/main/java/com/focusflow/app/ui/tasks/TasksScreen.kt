@@ -65,7 +65,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import com.focusflow.app.notify.AlarmMode
+import com.focusflow.app.notify.ExactAlarms
+import com.focusflow.app.notify.TaskAlarmService
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextDecoration
@@ -78,6 +83,7 @@ import com.focusflow.app.domain.Points
 import com.focusflow.app.domain.QuickTaskParser
 import com.focusflow.app.domain.TaskMetrics
 import com.focusflow.app.domain.TaskTime
+import com.focusflow.app.domain.repeatRule
 import com.focusflow.app.domain.isRunning
 import com.focusflow.app.domain.isUntimed
 import com.focusflow.app.focus.FocusState
@@ -112,6 +118,7 @@ fun TasksScreen(
     var showDatePicker by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showMetricSettings by remember { mutableStateOf(false) }
+    var showAlarmSettings by remember { mutableStateOf(false) }
     var confirmMarkAll by remember { mutableStateOf(false) }
 
     // Same filter as iOS: only repeat tasks are filtered by their completion rate.
@@ -186,6 +193,10 @@ fun TasksScreen(
                             onClick = { showMenu = false; showMetricSettings = true },
                         )
                         DropdownMenuItem(
+                            text = { Text("Task start alarm") },
+                            onClick = { showMenu = false; showAlarmSettings = true },
+                        )
+                        DropdownMenuItem(
                             text = { Text("Mark all not completed") },
                             onClick = { showMenu = false; confirmMarkAll = true },
                         )
@@ -232,6 +243,7 @@ fun TasksScreen(
                     now = now,
                     onTapEmpty = { newTask(it) },
                     onSelect = { selectedId = it.id },
+                    onMove = vm::moveTask,
                     onComplete = vm::toggleCompleted,
                     onNotComplete = vm::toggleNotCompleted,
                 )
@@ -275,6 +287,7 @@ fun TasksScreen(
         )
     }
 
+    if (showAlarmSettings) AlarmSettingsDialog(onDismiss = { showAlarmSettings = false })
     if (showMetricSettings) {
         MetricSettingsDialog(
             days = metricDays,
@@ -284,6 +297,58 @@ fun TasksScreen(
             onDismiss = { showMetricSettings = false },
         )
     }
+}
+
+/** Choose what happens when a task starts, and try it out. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AlarmSettingsDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var mode by remember { mutableStateOf(AlarmMode.get(context)) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Task start alarm") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "When a timed task starts, ring until you tap Got it, even with the app closed or the screen off.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AlarmMode.entries.forEach { m ->
+                        FilterChip(
+                            selected = m == mode,
+                            onClick = { mode = m; AlarmMode.set(context, m) },
+                            label = { Text(m.label) },
+                        )
+                    }
+                }
+                if (mode != AlarmMode.Off) {
+                    OutlinedButton(
+                        onClick = { TaskAlarmService.ring(context, "test-alarm", "Test alarm") },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("Test alarm") }
+                    if (!TaskAlarmService.canShowFullScreen(context)) {
+                        Text(
+                            "To show the alarm over the lock screen, allow full-screen notifications.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        TextButton(onClick = { TaskAlarmService.openFullScreenSettings(context) }) { Text("Open setting") }
+                    }
+                    if (!ExactAlarms.isAllowed(context)) {
+                        Text(
+                            "Turn on \"Alarms & reminders\" so the alarm rings at the exact minute with the screen off.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        TextButton(onClick = { ExactAlarms.openSettings(context) }) { Text("Open setting") }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Done") } },
+    )
 }
 
 @Composable
@@ -429,7 +494,7 @@ fun TaskCard(
                         MetaText("${TaskTime.displayTime(task.startTime)} – ${TaskTime.displayTime(task.endTime)}")
                     }
                     MetaText("${task.weight.pts()} pt")
-                    task.repeatAgain?.let { days ->
+                    task.repeatRule?.let { rule ->
                         Icon(
                             Icons.Filled.Repeat,
                             contentDescription = "Repeats",
@@ -437,7 +502,7 @@ fun TaskCard(
                             // Red = next occurrence already handled, as on iOS.
                             tint = if (task.reassign) StatusColors.Red else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        MetaText("${days}d")
+                        MetaText(rule.shortLabel() + (task.repeatNumber?.let { " · #$it" } ?: ""))
                     }
                     metrics?.let {
                         MetaText(
