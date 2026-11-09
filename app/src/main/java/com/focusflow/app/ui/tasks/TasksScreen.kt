@@ -3,6 +3,7 @@ package com.focusflow.app.ui.tasks
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import com.focusflow.app.domain.isDone
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -154,7 +155,8 @@ fun TasksScreen(
     // Scroll the timeline to an hour before now (or to 7 AM on other days).
     val listState = rememberLazyListState()
     val density = LocalDensity.current
-    val headerItems = 3 + (if (focus.isActive) 1 else 0) + (if (untimed.isNotEmpty()) 1 + untimed.size else 0)
+    // Items above the timeline: quick add, spacer, focus banner, untimed section. (Points are pinned outside the list.)
+    val headerItems = 2 + (if (focus.isActive) 1 else 0) + (if (untimed.isNotEmpty()) 1 + untimed.size else 0)
     LaunchedEffect(date, allTasks.isNotEmpty()) {
         val hour = if (isToday) (LocalTime.now().hour - 1).coerceAtLeast(0) else 7
         val offset = with(density) { (HourHeight * hour).roundToPx() }
@@ -208,46 +210,50 @@ fun TasksScreen(
             FloatingActionButton(onClick = { newTask() }) { Icon(Icons.Filled.Add, "Add task") }
         },
     ) { padding ->
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.padding(padding),
-            contentPadding = PaddingValues(bottom = 96.dp),
-        ) {
-            item { PointsHeader(points) }
-            item { QuickAddBar(onAdd = vm::quickAdd) }
-            item { Spacer(Modifier.size(4.dp)) }
-            if (focus.isActive) {
-                item {
-                    FocusBanner(focus, onPause = vm::pauseFocus, onResume = vm::resumeFocus, onStop = vm::stopFocus)
+        Column(Modifier.padding(padding)) {
+            // Pinned above the list so points and counts stay visible while scrolling.
+            PointsHeader(points, allTasks)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 96.dp),
+            ) {
+                item { QuickAddBar(onAdd = vm::quickAdd) }
+                item { Spacer(Modifier.size(4.dp)) }
+                if (focus.isActive) {
+                    item {
+                        FocusBanner(focus, onPause = vm::pauseFocus, onResume = vm::resumeFocus, onStop = vm::stopFocus)
+                    }
                 }
-            }
-            if (untimed.isNotEmpty()) {
-                item { SectionLabel("Untimed") }
-                items(untimed, key = { it.id }) { task ->
-                    TaskCard(
-                        task = task,
-                        metrics = metrics[task.id],
-                        isCurrent = false,
-                        onClick = { selectedId = task.id },
-                        onComplete = { vm.toggleCompleted(task) },
-                        onNotComplete = { vm.toggleNotCompleted(task) },
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                if (untimed.isNotEmpty()) {
+                    item { SectionLabel("Untimed") }
+                    items(untimed, key = { it.id }) { task ->
+                        TaskCard(
+                            task = task,
+                            metrics = metrics[task.id],
+                            isCurrent = false,
+                            onClick = { selectedId = task.id },
+                            onComplete = { vm.toggleCompleted(task) },
+                            onNotComplete = { vm.toggleNotCompleted(task) },
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+                item(key = "timeline") {
+                    Timeline(
+                        tasks = timed,
+                        metrics = metrics,
+                        isToday = isToday,
+                        now = now,
+                        onTapEmpty = { newTask(it) },
+                        onSelect = { selectedId = it.id },
+                        onMove = vm::moveTask,
+                        onComplete = vm::toggleCompleted,
+                        onNotComplete = vm::toggleNotCompleted,
                     )
                 }
-            }
-            item(key = "timeline") {
-                Timeline(
-                    tasks = timed,
-                    metrics = metrics,
-                    isToday = isToday,
-                    now = now,
-                    onTapEmpty = { newTask(it) },
-                    onSelect = { selectedId = it.id },
-                    onMove = vm::moveTask,
-                    onComplete = vm::toggleCompleted,
-                    onNotComplete = vm::toggleNotCompleted,
-                )
-            }
+        }
         }
     }
 
@@ -352,27 +358,44 @@ private fun AlarmSettingsDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun PointsHeader(points: Points) {
+private fun PointsHeader(points: Points, tasks: List<TaskEntity>) {
     val color = StatusColors.forPercent(points.percent)
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    val done = tasks.count { it.completed }
+    val missed = tasks.count { it.notCompleted && !it.completed }
+    val unmarked = tasks.count { !it.isDone }
+    Column(
+        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
     ) {
-        Text("Points", style = MaterialTheme.typography.labelLarge)
-        Spacer(Modifier.width(8.dp))
-        Text(
-            "${points.earned.pts()} / ${points.total.pts()}",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.weight(1f))
-        Box(
-            Modifier.background(color.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
-                .padding(horizontal = 10.dp, vertical = 4.dp),
-        ) {
-            Text("${points.percent}%", color = color, fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Points", style = MaterialTheme.typography.labelLarge)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "${points.earned.pts()} / ${points.total.pts()}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.weight(1f))
+            Box(
+                Modifier.background(color.copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+            ) {
+                Text("${points.percent}%", color = color, fontWeight = FontWeight.Bold)
+            }
+        }
+        Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            CountLabel("✓ $done done", StatusColors.Green)
+            CountLabel("✗ $missed missed", StatusColors.Red)
+            CountLabel("○ $unmarked unmarked", MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.weight(1f))
+            CountLabel("${done + missed}/${tasks.size} marked", MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+}
+
+@Composable
+private fun CountLabel(text: String, color: androidx.compose.ui.graphics.Color) {
+    Text(text, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1)
 }
 
 @Composable
